@@ -1,0 +1,99 @@
+image: python:3.7.2
+pipelines:
+  branches:
+    master:
+      - step:
+          name: Setup virtual environment
+          script:
+            - mkdir -p ~/venv
+            - virtualenv --python=python3 ~/venv
+            - echo ". ~/venv/bin/activate" >> $BASH_ENV
+            - . ~/venv/bin/activate
+            - python --version
+      
+      - step:
+          name: Install Dependencies
+          script:
+            - python -m pip install --upgrade pip setuptools
+            - python -m pip install coverage
+            - python -m pip install codecov
+            - mkdir -p ~/ParlAI/test-results
+            - pip install -v -r requirements.txt
+            - python setup.py develop
+            - python -c "import nltk; nltk.download('punkt')"
+      
+      - step:
+          name: Coverage report
+          script:
+            - python -m codecov
+            - mkdir -p ~/ParlAI/data
+
+      - step:
+          name: Install torch GPU and dependencies
+          script:
+            - python -m pip install --progress-bar off torch==1.7.1+cu101 torchvision==0.8.2+cu101 -f https://download.pytorch.org/whl/torch_stable.html
+            - python -m pip install --progress-bar off 'fairscale~=0.3.0'
+            - python -m pip install --progress-bar off 'torchtext==0.7.0'
+            - python -m pip install --progress-bar off pytorch-pretrained-bert
+            - python -m pip install --progress-bar off 'transformers==4.3.3'
+            - python -m pip install --progress-bar off 'fairseq==0.10.0'
+            - python -m pip install --progress-bar off 'faiss-gpu==1.7.0'
+            - python -c 'import torch; print("Torch version:", torch.__version__)'
+            - python -m torch.utils.collect_env
+      
+      - step:
+          name: Install opencv, vqa-maskrcnn-benchmark
+          script:
+            - if [! python -c 'import maskrcnn_benchmark']; then python -m pip install opencv-python==4.2.0.34; git clone https://gitlab.com/vedanuj/vqa-maskrcnn-benchmark.git maskbench; cd maskbench; git checkout 4c168a637f45dc69efed384c00a7f916f57b25b8 -b stable; python setup.py develop; cd - ; fi
+
+      - step:
+          name: Install Mephisto
+          script:
+            - cd ..
+            - git clone git@github.com:facebookresearch/Mephisto.git Mephisto
+            - cd Mephisto; git checkout v0.4.1 -b stable
+            - pip install -r requirements.txt
+            - python setup.py develop
+            - echo | mephisto check
+
+      - step:
+          name: Setup CUDA
+          script:
+            - # download and install nvidia drivers, cuda, etc
+            - wget --quiet --no-clobber -P ~/nvidia-downloads 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-430.40.run'
+            - time sudo /bin/bash ~/nvidia-downloads/NVIDIA-Linux-x86_64-430.40.run --no-drm -q --ui=none
+            - echo "Done installing NVIDIA drivers."
+            - pyenv versions
+            - nvidia-smi
+            - pyenv global 3.7.0
+
+      - step:
+          name: Run Unit Test cases
+          script: 
+            - cd ~/ParlAI
+            - mkdir -p ~/ParlAI/data/models
+            - python -m pytest | grep '<'  | sed "s/^ *//" > teststorun.txt
+            - cat teststorun.txt
+
+      - step:
+          name: Build the website
+          script:
+            - cd ~/ParlAI/website
+            - make
+
+      - step:
+          name: zip up the website
+          script:
+            - cd ~/ParlAI/website/build/
+            - zip -r ~/ParlAI/website.zip *
+          artifacts:
+            - website.zip
+      
+       - step:
+          name: check for bad links
+          script:
+            - cd ~/ParlAI/
+            - pip install linkchecker
+            - python -m http.server --directory website/build >/dev/null &
+            - linkchecker http://localhost:8000/
+            - kill %1

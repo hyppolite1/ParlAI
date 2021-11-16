@@ -1,0 +1,25 @@
+#Use Image Python Image
+FROM python:3.7.2
+
+#Clone ParlAI code from Github
+RUN git clone https://github.com/facebookresearch/ParlAI.git ~/ParlAI
+
+#Change Directory & Set Working Directory
+RUN cd ~/ParlAI;
+WORKDIR /ParlAI
+
+#Copy requirements.txt and Install dependencies
+COPY requirements.txt requirements.txt
+RUN pip install -r requirements.txt
+
+#Run Python Unit Test cases
+RUN pytest
+
+#Run setup.py Repository
+RUN python setup.py develop
+
+#Run website and expose 8000
+RUN cd ~/ParlAI/website
+RUN make
+RUN python -m http.server --directory website/build >/dev/null &
+EXPOSE 8000
